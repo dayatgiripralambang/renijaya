@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import * as XLSX from 'xlsx';
 
+// Fungsi format angka ke Rupiah
+const formatRupiah = (angka) => {
+    return new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0
+    }).format(angka || 0);
+};
+
 export default function LaporanStok() {
     // 1. DEKLARASIKAN FUNGSI TANGGAL TERLEBIH DAHULU
     const getTodayDate = () => {
@@ -117,11 +126,16 @@ export default function LaporanStok() {
 
     const exportExcel = () => {
         if (filteredProduk.length === 0) return alert("Tidak ada data");
+        // Diperbarui: Excel juga ikut menampikan nominal harga
         const dataFormat = filteredProduk.map(item => ({
             "Kategori": item.kategori || "Tanpa Kategori",
             "Barcode": item.barcode,
             "Nama Produk": item.nama,
-            "Stok": item.stok
+            "Stok": item.stok,
+            "Harga Beli": item.harga_modal,
+            "Total Beli": item.harga_modal * item.stok,
+            "Harga Jual": item.harga_jual,
+            "Total Jual": item.harga_jual * item.stok
         }));
         const worksheet = XLSX.utils.json_to_sheet(dataFormat);
         const workbook = XLSX.utils.book_new();
@@ -200,6 +214,10 @@ export default function LaporanStok() {
                                     <th className="text-left py-2 px-4 font-semibold text-gray-600">Barcode</th>
                                     <th className="text-left py-2 px-4 font-semibold text-gray-600">Nama Produk</th>
                                     <th className="text-center py-2 px-4 font-semibold text-gray-600">Sisa Stok</th>
+                                    <th className="text-right py-2 px-4 font-semibold text-gray-600">Harga Beli</th>
+                                    <th className="text-right py-2 px-4 font-semibold text-gray-600">Total Beli</th>
+                                    <th className="text-right py-2 px-4 font-semibold text-gray-600">Harga Jual</th>
+                                    <th className="text-right py-2 px-4 font-semibold text-gray-600">Total Jual</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -215,6 +233,18 @@ export default function LaporanStok() {
                                             }`}>
                                                 {item.stok}
                                             </span>
+                                        </td>
+                                        <td className="py-2 px-4 text-right font-medium text-orange-600">
+                                            {formatRupiah(item.harga_modal)}
+                                        </td>
+                                        <td className="py-2 px-4 text-right font-bold text-orange-700">
+                                            {formatRupiah(item.harga_modal * item.stok)}
+                                        </td>
+                                        <td className="py-2 px-4 text-right font-medium text-emerald-600">
+                                            {formatRupiah(item.harga_jual)}
+                                        </td>
+                                        <td className="py-2 px-4 text-right font-bold text-emerald-700">
+                                            {formatRupiah(item.harga_jual * item.stok)}
                                         </td>
                                     </tr>
                                 ))}
@@ -263,7 +293,6 @@ export default function LaporanStok() {
                                                             {new Date(Number(log.tanggal)).toLocaleString('id-ID')}
                                                         </td>
                                                         <td className="py-2 px-4 font-mono text-gray-500">{log.barcode}</td>
-                                                        {/* Membaca nama produk hasil dari join tabel */}
                                                         <td className="py-2 px-4 font-medium text-gray-800">{log.produk?.nama || 'Produk Dihapus'}</td>
                                                         <td className="py-2 px-4 text-center font-bold text-lg">
                                                             <span className={historyModal.type === 'masuk' ? 'text-green-600' : 'text-red-600'}>
