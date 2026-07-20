@@ -25,19 +25,23 @@ export default function ManajemenUser() {
     setTimeout(() => setMessage({ text: '', type: '' }), 4000);
   };
 
-  const fetchUsers = async () => {
+const fetchUsers = async () => {
     setLoading(true);
+    
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .eq('is_deleted', false)      // WAJIB: Hanya ambil yang belum dihapus
-      .neq('role', 'superuser')    // Sembunyikan superuser
+      // Mengambil yang false ATAU NULL
+      .or('is_deleted.eq.false,is_deleted.is.null') 
+      // Tetap sembunyikan superuser
+      .neq('role', 'superuser')
       .order('created_at', { ascending: false });
 
     if (error) {
+      console.error("Supabase Error:", error);
       showMessage('Gagal memuat data pengguna.', 'error');
     } else {
-      setUsers(data);
+      setUsers(data || []);
     }
     setLoading(false);
   };
@@ -102,39 +106,35 @@ export default function ManajemenUser() {
     }
 
     // LOGIKA CREATE BARU
-    if (modalMode === 'create') {
-      if (existingUser && !existingUser.is_deleted) {
-        showMessage('Email sudah terdaftar dan aktif.', 'error');
-        setLoading(false);
-        return;
-      }
+  if (modalMode === 'create') {
+  if (existingUser && !existingUser.is_deleted) {
+    showMessage('Email sudah terdaftar dan aktif.', 'error');
+    setLoading(false);
+    return;
+  }
 
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-      });
-
-      if (authError) {
-        showMessage(`Gagal: ${authError.message}`, 'error');
-        setLoading(false);
-        return;
+  // 1. SignUp dengan menyertakan metadata (Nama dan Role)
+  const { data: authData, error: authError } = await supabase.auth.signUp({
+    email: formData.email,
+    password: formData.password,
+    options: {
+      data: {
+        nama: formData.nama,
+        role: formData.role
       }
+    }
+  });
 
-      if (authData.user) {
-        const { error: updateError } = await supabase
-          .from('users')
-          .update({ nama: formData.nama, role: formData.role, is_deleted: false })
-          .eq('id', authData.user.id);
-        
-        if (updateError) {
-          showMessage(`Gagal menyimpan detail pengguna: ${updateError.message}`, 'error');
-        } else {
-          showMessage('Pengguna baru berhasil ditambahkan.');
-          fetchUsers();
-          closeModal();
-        }
-      }
-    } 
+  if (authError) {
+    showMessage(`Gagal: ${authError.message}`, 'error');
+  } else {
+    // 2. Tidak perlu update manual ke public.users! 
+    // Trigger sudah melakukannya otomatis saat signUp sukses.
+    showMessage('Pengguna baru berhasil ditambahkan.');
+    fetchUsers();
+    closeModal();
+  }
+}
     // LOGIKA EDIT
     else if (modalMode === 'edit') {
       const { error: updateError } = await supabase

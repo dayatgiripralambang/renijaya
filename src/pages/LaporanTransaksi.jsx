@@ -91,11 +91,21 @@ const openDetail = async (transaksiItem) => {
         
         const { data, error } = await supabase
             .from('detail_transaksi')
-            .select('nama_produk, harga_jual, jumlah')
+            .select(`
+                nama_produk, 
+                harga_jual, 
+                jumlah, 
+                diskon_manual_persen, 
+                diskon_manual_nominal,
+                produk ( harga_jual )
+            `)
             .eq('transaksi_id', transaksiItem.id);
             
         if (error) {
             console.error('Gagal menarik rincian:', error);
+            // PERBAIKAN: Matikan loading jika terjadi error agar tidak stuck
+            setDetailModal({ isOpen: true, transaction: transaksiItem, data: [], loading: false });
+            alert("Gagal menarik rincian: " + error.message);
         } else {
             setDetailModal({ isOpen: true, transaction: transaksiItem, data: data || [], loading: false });
         }
@@ -399,8 +409,7 @@ const fetchAllDetailsForExport = async () => {
                         </button>
                     </div>
                 </div>
-            )}
-
+                )}
 {detailModal.isOpen && detailModal.transaction && (
                 <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-lg shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[90vh]">
@@ -451,35 +460,110 @@ const fetchAllDetailsForExport = async () => {
                                 <div className="text-center py-6 text-gray-500 text-xs">Item tidak ditemukan.</div>
                             ) : (
                                 <div className="mb-3">
-                                    {detailModal.data.map((item, idx) => (
-                                        <div key={idx} className="mb-2 text-xs">
-                                            <div className="font-bold">{item.nama_produk}</div>
-                                            <div className="flex justify-between text-gray-600 mt-1">
-                                                <span>{item.jumlah} x {formatRupiah(item.harga_jual)}</span>
-                                                <span className="text-gray-900 font-bold">{formatRupiah(item.harga_jual * item.jumlah)}</span>
+                                    {detailModal.data.map((item, idx) => {
+                                        // 1. Ambil harga asli & kalkulasi subtotal normal
+                                        const hargaAsli = item.produk?.harga_jual || item.harga_jual;
+                                        const subtotalNormal = hargaAsli * item.jumlah;
+                                        
+                                        // 2. Kalkulasi Diskon Promo
+                                        const subtotalSetelahPromo = item.harga_jual * item.jumlah;
+                                        const nilaiDiskonPromo = subtotalNormal - subtotalSetelahPromo;
+
+                                        // 3. Kalkulasi Diskon Kasir (Manual)
+                                        const diskonPersen = item.diskon_manual_persen || 0;
+                                        const diskonNominal = item.diskon_manual_nominal || 0;
+                                        
+                                        let nilaiDiskonManual = 0;
+                                        if (diskonPersen > 0) {
+                                            nilaiDiskonManual = (hargaAsli * diskonPersen / 100) * item.jumlah;
+                                        } else if (diskonNominal > 0) {
+                                            nilaiDiskonManual = diskonNominal * item.jumlah;
+                                        }
+
+                                        return (
+                                            <div key={idx} className="mb-2 text-xs border-b border-gray-100 pb-2">
+                                                <div className="font-bold">{item.nama_produk}</div>
+                                                <div className="flex justify-between text-gray-600 mt-1">
+                                                    <span>{item.jumlah} x {formatRupiah(hargaAsli)}</span>
+                                                    <span className={(nilaiDiskonManual > 0 || nilaiDiskonPromo > 0) ? "line-through text-gray-400" : "text-gray-900 font-bold"}>
+                                                        {formatRupiah(subtotalNormal)}
+                                                    </span>
+                                                </div>
+                                                
+                                                {/* Munculkan rincian Promo (Jika Ada) */}
+                                                {nilaiDiskonPromo > 0 && (
+                                                    <div className="flex justify-between text-orange-600 font-bold mt-1">
+                                                        <span>Promo Sistem</span>
+                                                        <span>-{formatRupiah(nilaiDiskonPromo)}</span>
+                                                    </div>
+                                                )}
+
+                                                {/* Munculkan rincian Diskon Manual (Jika Ada) */}
+                                                {nilaiDiskonManual > 0 && (
+                                                    <div className="flex justify-between text-red-600 font-bold mt-1">
+                                                        <span>Diskon {diskonPersen > 0 ? `(${diskonPersen}%)` : ''}</span>
+                                                        <span>-{formatRupiah(nilaiDiskonManual)}</span>
+                                                    </div>
+                                                )}
                                             </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
 
                             <div className="border-t border-dashed border-gray-400 my-3"></div>
 
-                            {/* Rangkuman Pembayaran */}
-                            <div className="space-y-1 text-xs">
-                                <div className="flex justify-between font-bold text-sm">
-                                    <span>TOTAL</span>
-                                    <span>{formatRupiah(detailModal.transaction.total_harga)}</span>
-                                </div>
-                                <div className="flex justify-between pt-1">
-                                    <span>Tunai</span>
-                                    <span>{formatRupiah(detailModal.transaction.nominal_bayar)}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span>Kembali</span>
-                                    <span>{formatRupiah(detailModal.transaction.nominal_kembali)}</span>
-                                </div>
-                            </div>
+                            {/* Rangkuman Pembayaran (Dihitung Dinamis) */}
+                            {(() => {
+                                let totalBelanjaNormal = 0;
+                                let totalDiskonGlobal = 0;
+
+                                // Hitung total global khusus untuk tampilan nota rincian
+                                if (!detailModal.loading && detailModal.data.length > 0) {
+                                    detailModal.data.forEach(item => {
+                                        const hargaAsli = item.produk?.harga_jual || item.harga_jual;
+                                        const subNormal = hargaAsli * item.jumlah;
+                                        const subPromo = item.harga_jual * item.jumlah;
+                                        
+                                        const disPromo = subNormal - subPromo;
+                                        
+                                        const dPersen = item.diskon_manual_persen || 0;
+                                        const dNominal = item.diskon_manual_nominal || 0;
+                                        
+                                        let dManual = 0;
+                                        if (dPersen > 0) dManual = (hargaAsli * dPersen / 100) * item.jumlah;
+                                        else if (dNominal > 0) dManual = dNominal * item.jumlah;
+
+                                        totalBelanjaNormal += subNormal;
+                                        totalDiskonGlobal += (disPromo + dManual);
+                                    });
+                                }
+
+                                return (
+                                    <div className="space-y-1 text-xs">
+                                        <div className="flex justify-between text-gray-600">
+                                            <span>Total Normal</span>
+                                            <span>{formatRupiah(totalBelanjaNormal)}</span>
+                                        </div>
+                                        <div className="flex justify-between text-red-600 pb-1">
+                                            <span>Total Diskon</span>
+                                            <span>-{formatRupiah(totalDiskonGlobal)}</span>
+                                        </div>
+                                        <div className="flex justify-between font-bold text-sm pt-2 border-t border-gray-200">
+                                            <span>TOTAL BAYAR</span>
+                                            <span>{formatRupiah(detailModal.transaction.total_harga)}</span>
+                                        </div>
+                                        <div className="flex justify-between pt-1">
+                                            <span>Tunai</span>
+                                            <span>{formatRupiah(detailModal.transaction.nominal_bayar)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span>Kembali</span>
+                                            <span>{formatRupiah(detailModal.transaction.nominal_kembali)}</span>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
                             <div className="border-t border-dashed border-gray-400 my-4"></div>
 
